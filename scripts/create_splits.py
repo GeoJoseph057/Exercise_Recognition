@@ -1,5 +1,6 @@
 """
 Create train/val/test splits from processed poses
+Handles tiny datasets by disabling stratification when necessary
 Usage: python scripts/create_splits.py --data_dir data/processed
 """
 
@@ -25,6 +26,10 @@ def main():
     # Find all pose files
     pose_files = list(data_dir.rglob('*.npz'))
     print(f"Found {len(pose_files)} pose files")
+
+    if len(pose_files) == 0:
+        print("❌ No pose files found! Make sure you've run extract_poses.py first")
+        return
 
     # Extract class labels from folder structure
     samples = []
@@ -54,37 +59,70 @@ def main():
     for c, count in class_counts.items():
         print(f"  {c}: {count}")
 
-    # Split data
+    # Check if dataset is severely imbalanced or too small
+    min_samples = min(class_counts.values())
+    max_samples = max(class_counts.values())
+
+    # Detect and warn about imbalanced dataset
+    if max_samples / min_samples > 10:
+        print(f"\n⚠️  WARNING: Severe class imbalance detected!")
+        print(f"   Largest class has {max_samples} samples")
+        print(f"   Smallest class has {min_samples} samples")
+        print(f"   Consider collecting more data for underrepresented classes")
+
+    # Simple random split (no stratification for tiny/imbalanced datasets)
+    print(f"\n📊 Using simple random split (stratification disabled for imbalanced data)")
+
     np.random.seed(args.seed)
+    np.random.shuffle(samples)
 
-    # First split: train + val vs test
-    train_val, test = train_test_split(
-        samples,
-        test_size=args.test_ratio,
-        stratify=[s['label'] for s in samples],
-        random_state=args.seed
-    )
+    # Calculate split indices
+    n_total = len(samples)
+    n_test = max(1, int(n_total * args.test_ratio))
+    n_val = max(1, int(n_total * args.val_ratio))
+    n_train = n_total - n_test - n_val
 
-    # Second split: train vs val
-    val_ratio_adjusted = args.val_ratio / (args.train_ratio + args.val_ratio)
-    train, val = train_test_split(
-        train_val,
-        test_size=val_ratio_adjusted,
-        stratify=[s['label'] for s in train_val],
-        random_state=args.seed
-    )
+    # Ensure we have at least 1 sample in each split
+    if n_train < 1:
+        print("❌ Not enough samples to create all splits!")
+        print("   You need at least 3 samples total")
+        return
+
+    # Split the data
+    test = samples[:n_test]
+    val = samples[n_test:n_test + n_val]
+    train = samples[n_test + n_val:]
 
     print(f"\nSplit sizes:")
-    print(f"  Train: {len(train)}")
-    print(f"  Val: {len(val)}")
-    print(f"  Test: {len(test)}")
+    print(f"  Train: {len(train)} ({len(train)/n_total*100:.1f}%)")
+    print(f"  Val: {len(val)} ({len(val)/n_total*100:.1f}%)")
+    print(f"  Test: {len(test)} ({len(test)/n_total*100:.1f}%)")
+
+    # Verify splits - show class distribution
+    print("\nClass distribution per split:")
+    all_classes = set(classes)
+
+    for split_name, split_data in [('Train', train), ('Val', val), ('Test', test)]:
+        split_classes = {}
+        for s in split_data:
+            split_classes[s['label']] = split_classes.get(s['label'], 0) + 1
+
+        print(f"\n  {split_name}:")
+        for cls in classes:
+            count = split_classes.get(cls, 0)
+            print(f"    {cls}: {count}")
+
+        # Check for missing classes
+        missing = all_classes - set(split_classes.keys())
+        if missing:
+            print(f"    ⚠️  Missing classes: {missing}")
 
     # Save splits
     for split_name, split_data in [('train', train), ('val', val), ('test', test)]:
         split_file = splits_dir / f'{split_name}.json'
         with open(split_file, 'w') as f:
             json.dump(split_data, f, indent=2)
-        print(f"✅ Saved {split_file}")
+        print(f"\n✅ Saved {split_file}")
 
     # Save class mapping
     classes_file = data_dir / 'classes.json'
@@ -92,7 +130,24 @@ def main():
         json.dump(classes, f, indent=2)
     print(f"✅ Saved {classes_file}")
 
-    print("\n✅ Splits created successfully!")
+    # Final warnings
+    print("\n" + "="*60)
+    if min_samples < 10:
+        print("⚠️  CRITICAL: Your dataset is too small for real training!")
+        print("   Current status:")
+        print(f"   - Smallest class: {min_samples} samples (need 20+ per class)")
+        print(f"   - Total samples: {n_total}")
+        print("\n   Recommendations:")
+        print("   1. Collect more videos (aim for 20-50 per class)")
+        print("   2. Or use data augmentation to increase samples")
+        print("   3. This will only work for testing the pipeline, not real training")
+    elif max_samples / min_samples > 5:
+        print("⚠️  WARNING: Severe class imbalance detected!")
+        print("   This will hurt model performance")
+        print("   Consider balancing your dataset or using class weights")
+    else:
+        print("✅ Splits created successfully!")
+    print("="*60)
 
 if __name__ == '__main__':
     main()
