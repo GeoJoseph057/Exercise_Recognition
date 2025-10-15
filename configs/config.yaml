@@ -1,0 +1,75 @@
+# Project Configuration
+project_name: "exercise_recognition"
+experiment_name: "mediapipe_vit_v1"
+
+# Data
+data:
+  raw_path: "data/raw"
+  processed_path: "data/processed"
+  splits_path: "data/splits"
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+  seed: 42
+
+# MediaPipe Pose
+pose:
+  model_complexity: 1  # 0, 1, or 2
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+  static_image_mode: false
+  num_keypoints: 33  # MediaPipe Pose landmarks
+  temporal_window: 30  # frames to consider (1 second at 30fps)
+
+# Model Architecture
+model:
+  type: "pose_vit"  # or "pose_lstm"
+
+  # For Vision Transformer
+  vit:
+    embed_dim: 256
+    depth: 6
+    num_heads: 8
+    mlp_ratio: 4
+    dropout: 0.1
+
+  # For LSTM (alternative)
+  lstm:
+    hidden_dim: 256
+    num_layers: 2
+    dropout: 0.3
+    bidirectional: true
+
+# Training
+training:
+  epochs: 50
+  batch_size: 32
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  optimizer: "adamw"
+  scheduler: "cosine"
+  warmup_epochs: 5
+
+  # Data Augmentation
+  augmentation:
+    temporal_jitter: true
+    spatial_noise: 0.02  # Add noise to keypoints
+    random_temporal_crop: true
+
+  # Early Stopping
+  patience: 10
+  min_delta: 0.001
+
+# Inference
+inference:
+  fps_target: 30
+  confidence_threshold: 0.6
+  smoothing_window: 5  # frames
+
+# Paths
+paths:
+  checkpoints: "models/checkpoints"
+  final_model: "models/final"
+  onnx_model: "models/onnx"
+  logs: "logs"
+  tensorboard: "runs"
