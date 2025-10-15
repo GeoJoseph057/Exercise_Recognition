@@ -23,7 +23,7 @@ pose:
 
 # Model Architecture
 model:
-  type: "pose_vit"  # or "pose_lstm"
+  type: "vit"  # Changed from pose_vit to vit
 
   # For Vision Transformer
   vit:
@@ -32,6 +32,7 @@ model:
     num_heads: 8
     mlp_ratio: 4
     dropout: 0.1
+    max_seq_len: 100  # Added max_seq_len for Vision Transformer
 
   # For LSTM (alternative)
   lstm:
