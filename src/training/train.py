@@ -59,7 +59,7 @@ class Trainer:
                 data_dir=self.config['data']['processed_path'],
                 batch_size=self.config['training']['batch_size'],
                 sequence_length=self.config['pose']['temporal_window'],
-                num_workers=4
+                num_workers=0
             )
 
         print(f"Train batches: {len(self.train_loader)}")
