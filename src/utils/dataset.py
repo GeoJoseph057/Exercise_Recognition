@@ -43,11 +43,17 @@ class PoseSequenceDataset(Dataset):
 
         # Load split file
         split_file = self.data_dir / 'splits' / f'{split}.json'
+        if not split_file.exists():
+            raise FileNotFoundError(f"Split file not found: {split_file}")
+
         with open(split_file, 'r') as f:
             self.samples = json.load(f)
 
         # Load class mapping
         class_file = self.data_dir / 'classes.json'
+        if not class_file.exists():
+            raise FileNotFoundError(f"Classes file not found: {class_file}")
+
         with open(class_file, 'r') as f:
             self.classes = json.load(f)
         self.class_to_idx = {c: i for i, c in enumerate(self.classes)}
@@ -57,17 +63,46 @@ class PoseSequenceDataset(Dataset):
         self.sequences = []
         self._create_sequences()
 
+        if len(self.sequences) == 0:
+            raise ValueError(f"No valid sequences found in {split} split!")
+
         print(f"{split.upper()} Dataset: {len(self.sequences)} sequences from {len(self.samples)} videos")
 
     def _create_sequences(self):
         """Create sliding window sequences from videos"""
         for sample in self.samples:
-            pose_file = self.data_dir / 'processed' / sample['pose_file']
+            # Get pose file path - it should be relative to data_dir
+            pose_file_rel = Path(sample['pose_file'])
+
+            # Construct full path
+            pose_file = self.data_dir / pose_file_rel
+
+            if not pose_file.exists():
+                print(f"⚠️ Warning: File not found: {pose_file}")
+                continue
+
             label = self.class_to_idx[sample['label']]
 
             # Load pose data
-            poses = np.load(pose_file)
+            try:
+                data = np.load(pose_file, allow_pickle=True)
+                poses = data['poses'] if 'poses' in data else data['arr_0']
+
+                # Verify shape
+                if len(poses.shape) != 3 or poses.shape[1] != 33 or poses.shape[2] != 3:
+                    print(f"⚠️ Skipping {pose_file.name}: Invalid shape {poses.shape}")
+                    continue
+
+            except Exception as e:
+                print(f"⚠️ Error loading {pose_file}: {e}")
+                continue
+
             num_frames = len(poses)
+
+            # Skip if video is too short
+            if num_frames < self.sequence_length:
+                print(f"⚠️ Skipping {pose_file.name}: only {num_frames} frames (need {self.sequence_length})")
+                continue
 
             # Create windows
             for start_idx in range(0, num_frames - self.sequence_length + 1, self.stride):
@@ -112,16 +147,9 @@ class PoseSequenceDataset(Dataset):
         """
         pose_seq = pose_seq.copy()
 
-        # 1. Random temporal crop (slight variation in start/end)
-        if random.random() < 0.3:
-            crop_frames = random.randint(1, 3)
-            if len(pose_seq) > crop_frames:
-                start = random.randint(0, crop_frames)
-                pose_seq = pose_seq[start:start + self.sequence_length]
-
-        # 2. Horizontal flip (mirror)
+        # 1. Horizontal flip (mirror)
         if random.random() < 0.5:
-            pose_seq[:, :, 0] = -pose_seq[:, :, 0]  # Flip x coordinate
+            pose_seq[:, :, 0] = -pose_seq[:, :, 0]
             # Swap left-right landmarks
             left_right_pairs = [
                 (11, 12), (13, 14), (15, 16),  # Arms
@@ -132,20 +160,12 @@ class PoseSequenceDataset(Dataset):
             for left, right in left_right_pairs:
                 pose_seq[:, [left, right]] = pose_seq[:, [right, left]]
 
-        # 3. Add Gaussian noise to coordinates
+        # 2. Add Gaussian noise
         if random.random() < 0.5:
             noise = np.random.normal(0, 0.02, pose_seq[:, :, :2].shape)
             pose_seq[:, :, :2] += noise
 
-        # 4. Random temporal scaling (speed up/slow down)
-        if random.random() < 0.3:
-            scale_factor = random.uniform(0.8, 1.2)
-            new_length = int(len(pose_seq) * scale_factor)
-            if new_length > 0:
-                indices = np.linspace(0, len(pose_seq) - 1, self.sequence_length).astype(int)
-                pose_seq = pose_seq[indices]
-
-        # 5. Random rotation (around z-axis)
+        # 3. Random rotation
         if random.random() < 0.3:
             angle = random.uniform(-15, 15) * np.pi / 180
             cos_a, sin_a = np.cos(angle), np.sin(angle)
@@ -161,21 +181,24 @@ class PoseSequenceDataset(Dataset):
     def __getitem__(self, idx):
         """
         Returns:
-            pose_seq: (sequence_length, 33, 3) -> flattened to (sequence_length, 99)
+            pose_seq: (sequence_length, 99)
             label: int
         """
         seq_info = self.sequences[idx]
 
         # Load full pose sequence
-        poses = np.load(seq_info['pose_file'])
+        data = np.load(seq_info['pose_file'], allow_pickle=True)
+        poses = data['poses'] if 'poses' in data else data['arr_0']
 
         # Extract window
         pose_seq = poses[seq_info['start_idx']:seq_info['end_idx']].copy()
 
-        # Ensure correct length (pad if necessary)
+        # Ensure correct length
         if len(pose_seq) < self.sequence_length:
             padding = np.repeat(pose_seq[-1:], self.sequence_length - len(pose_seq), axis=0)
             pose_seq = np.concatenate([pose_seq, padding], axis=0)
+        elif len(pose_seq) > self.sequence_length:
+            pose_seq = pose_seq[:self.sequence_length]
 
         # Normalize
         if self.normalize:
@@ -185,7 +208,7 @@ class PoseSequenceDataset(Dataset):
         if self.augment:
             pose_seq = self._augment_pose(pose_seq)
 
-        # Flatten landmarks: (seq_len, 33, 3) -> (seq_len, 99)
+        # Flatten: (seq_len, 33, 3) -> (seq_len, 99)
         pose_seq = pose_seq.reshape(self.sequence_length, -1)
 
         # Convert to tensor
@@ -202,33 +225,26 @@ def create_dataloaders(
     num_workers=4,
     pin_memory=True
 ):
-    """
-    Create train, val, and test dataloaders
+    """Create train, val, and test dataloaders"""
 
-    Returns:
-        train_loader, val_loader, test_loader, num_classes
-    """
-    # Training dataset with augmentation
     train_dataset = PoseSequenceDataset(
         data_dir=data_dir,
         split='train',
         sequence_length=sequence_length,
-        stride=15,  # 50% overlap
+        stride=15,
         augment=True,
         normalize=True
     )
 
-    # Validation dataset
     val_dataset = PoseSequenceDataset(
         data_dir=data_dir,
         split='val',
         sequence_length=sequence_length,
-        stride=sequence_length,  # No overlap
+        stride=sequence_length,
         augment=False,
         normalize=True
     )
 
-    # Test dataset
     test_dataset = PoseSequenceDataset(
         data_dir=data_dir,
         split='test',
@@ -238,7 +254,6 @@ def create_dataloaders(
         normalize=True
     )
 
-    # Create dataloaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -265,36 +280,3 @@ def create_dataloaders(
     )
 
     return train_loader, val_loader, test_loader, train_dataset.num_classes
-
-
-# Example usage
-if __name__ == "__main__":
-    # Test dataset
-    data_dir = "data"
-
-    # Create dummy data structure for testing
-    print("Creating test dataset...")
-
-    dataset = PoseSequenceDataset(
-        data_dir=data_dir,
-        split='train',
-        sequence_length=30,
-        augment=True
-    )
-
-    print(f"\nDataset size: {len(dataset)}")
-    print(f"Number of classes: {dataset.num_classes}")
-    print(f"Classes: {dataset.classes}")
-
-    # Test batch
-    pose_seq, label = dataset[0]
-    print(f"\nSample shape: {pose_seq.shape}")  # (30, 99)
-    print(f"Label: {label} ({dataset.classes[label]})")
-
-    # Test dataloader
-    from torch.utils.data import DataLoader
-    loader = DataLoader(dataset, batch_size=8, shuffle=True)
-
-    batch_poses, batch_labels = next(iter(loader))
-    print(f"\nBatch poses shape: {batch_poses.shape}")  # (8, 30, 99)
-    print(f"Batch labels shape: {batch_labels.shape}")  # (8,)
