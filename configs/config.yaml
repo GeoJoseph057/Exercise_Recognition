@@ -56,7 +56,7 @@ training:
 inference:
   fps_target: 30
   confidence_threshold: 0.85
-  smoothing_window: 25
+  smoothing_window: 30
 
 paths:
   checkpoints: "models/checkpoints"

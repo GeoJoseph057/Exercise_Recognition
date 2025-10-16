@@ -28,7 +28,7 @@ class ExerciseRecognizer:
         config_path=None,
         sequence_length=30,
         confidence_threshold=0.85,
-        smoothing_window=25
+        smoothing_window=30
     ):
         """
         Args:
