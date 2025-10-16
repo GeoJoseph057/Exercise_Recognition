@@ -78,12 +78,14 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load data
+    # Load data - FIX: Set num_workers=0 for Windows
     print("Loading data...")
     train_loader, val_loader, test_loader, num_classes = create_dataloaders(
         data_dir=config['data']['processed_path'],
         batch_size=32,
-        sequence_length=config['pose']['temporal_window']
+        sequence_length=config['pose']['temporal_window'],
+        num_workers=0,  # FIXED: Set to 0 for Windows
+        pin_memory=False  # FIXED: Disable pin_memory when num_workers=0
     )
 
     # Select dataloader
@@ -123,8 +125,26 @@ def main():
     print(f"{'='*60}")
     print(f"Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
 
-    # Classification report
-    report = classification_report(y_true, y_pred, target_names=class_names, digits=4)
+    # Get unique classes present in predictions
+    unique_classes = np.unique(np.concatenate([y_true, y_pred]))
+    present_class_names = [class_names[i] for i in unique_classes]
+
+    # Warn if some classes are missing
+    if len(unique_classes) < len(class_names):
+        missing_classes = set(range(len(class_names))) - set(unique_classes)
+        missing_names = [class_names[i] for i in missing_classes]
+        print(f"\n⚠️  WARNING: Only {len(unique_classes)}/{len(class_names)} classes present in {args.split} set")
+        print(f"   Present classes: {present_class_names}")
+        print(f"   Missing classes: {missing_names}")
+        print(f"   This indicates your dataset is too small or imbalanced!\n")
+
+    # Classification report - use only present classes
+    report = classification_report(
+        y_true, y_pred,
+        labels=unique_classes.tolist(),
+        target_names=present_class_names,
+        digits=4
+    )
     print("\nClassification Report:")
     print(report)
 
@@ -133,9 +153,9 @@ def main():
         f.write(f"Accuracy: {accuracy:.4f}\n\n")
         f.write(report)
 
-    # Plot confusion matrix
+    # Plot confusion matrix - use only present classes
     plot_confusion_matrix(
-        y_true, y_pred, class_names,
+        y_true, y_pred, present_class_names,
         output_dir / f'{args.split}_confusion_matrix.png'
     )
 

@@ -1,0 +1,14 @@
+Accuracy: 0.9203
+
+                  precision    recall  f1-score   support
+
+      BenchPress     1.0000    0.5625    0.7200        16
+BodyWeightSquats     0.6829    0.9655    0.8000        29
+        JumpRope     0.9545    0.9692    0.9618        65
+          Lunges     0.9434    0.8065    0.8696        62
+         Pushups     1.0000    1.0000    1.0000        17
+            idle     0.9667    1.0000    0.9831        87
+
+        accuracy                         0.9203       276
+       macro avg     0.9246    0.8839    0.8891       276
+    weighted avg     0.9328    0.9203    0.9191       276
