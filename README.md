@@ -401,9 +401,7 @@ Model Inference (ViT forward pass)
     ↓
 Softmax → Class Prediction
     ↓
-Temporal Smoothing (5 frames)
+Temporal Smoothing (25 frames)
     ↓
 Display on Screen
 ```
-
----
