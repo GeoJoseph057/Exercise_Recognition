@@ -1,8 +1,7 @@
-# Project Configuration
+# GPU-Optimized Configuration for GTX 1650 (4GB VRAM)
 project_name: "exercise_recognition"
-experiment_name: "mediapipe_vit_v1"
+experiment_name: "mediapipe_vit_gpu"
 
-# Data
 data:
   raw_path: "data/raw"
   processed_path: "data/processed"
@@ -12,62 +11,53 @@ data:
   test_split: 0.15
   seed: 42
 
-# MediaPipe Pose
 pose:
-  model_complexity: 1  # 0, 1, or 2
+  model_complexity: 1
   min_detection_confidence: 0.5
   min_tracking_confidence: 0.5
   static_image_mode: false
-  num_keypoints: 33  # MediaPipe Pose landmarks
-  temporal_window: 30  # frames to consider (1 second at 30fps)
+  num_keypoints: 33
+  temporal_window: 20  # Shorter sequences = less memory
 
-# Model Architecture
 model:
-  type: "vit"  # Changed from pose_vit to vit
+  type: "vit"  # Changed from "post_vit" to "vit"
 
-  # For Vision Transformer
   vit:
-    embed_dim: 256
-    depth: 6
-    num_heads: 8
+    embed_dim: 128  # Smaller model for 4GB VRAM
+    depth: 4  # 4 layers instead of 6
+    num_heads: 4  # 4 heads instead of 8
     mlp_ratio: 4
     dropout: 0.1
-    max_seq_len: 100  # Added max_seq_len for Vision Transformer
+    max_seq_len: 100
 
-  # For LSTM (alternative)
   lstm:
-    hidden_dim: 256
+    hidden_dim: 128
     num_layers: 2
     dropout: 0.3
     bidirectional: true
 
-# Training
 training:
-  epochs: 50
-  batch_size: 32
-  learning_rate: 0.0001
+  epochs: 30
+  batch_size: 48  # Tuned for 4GB VRAM
+  learning_rate: 0.0003
   weight_decay: 0.0001
   optimizer: "adamw"
   scheduler: "cosine"
-  warmup_epochs: 5
+  warmup_epochs: 3
 
-  # Data Augmentation
   augmentation:
     temporal_jitter: true
-    spatial_noise: 0.02  # Add noise to keypoints
+    spatial_noise: 0.02
     random_temporal_crop: true
 
-  # Early Stopping
-  patience: 10
+  patience: 7
   min_delta: 0.001
 
-# Inference
 inference:
   fps_target: 30
   confidence_threshold: 0.6
-  smoothing_window: 5  # frames
+  smoothing_window: 5
 
-# Paths
 paths:
   checkpoints: "models/checkpoints"
   final_model: "models/final"
